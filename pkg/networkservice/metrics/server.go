@@ -35,22 +35,13 @@ import (
 	"github.com/networkservicemesh/sdk-vppagent/pkg/networkservice/vppagent"
 )
 
-// Server - helper interface to get some various information required for testing.
-type Server interface {
-	// GetMetricsReceived - show how many events we receive from internal vpp agent inerface
-	GetMetricsReceived() int
-	networkservice.NetworkServiceServer
-}
-
 type metricsServer struct {
 	interval        time.Duration
 	connections     map[string]*connectionInfo
 	vppConnections  map[string]string
 	executor        serialize.Executor
 	vppClient       configurator.StatsPollerServiceClient
-	metricsRecieved int
 	collectorCancel context.CancelFunc
-	Server
 }
 
 type connectionInfo struct {
@@ -58,13 +49,6 @@ type connectionInfo struct {
 	index        uint32
 	metrics      map[string]string
 	ifName       string
-}
-
-func (s *metricsServer) GetMetricsReceived() (result int) {
-	<-s.executor.AsyncExec(func() {
-		result = s.metricsRecieved
-	})
-	return
 }
 
 func (s *metricsServer) Request(ctx context.Context, request *networkservice.NetworkServiceRequest) (*networkservice.Connection, error) {
@@ -136,6 +120,7 @@ func NewServer(interval time.Duration, vppClient configurator.StatsPollerService
 }
 
 func (s *metricsServer) collect(ctx context.Context) {
+	logrus.Errorf("MetricsCollector: Start collector")
 	req := &configurator.PollStatsRequest{
 		PeriodSec: uint32(s.interval.Seconds()),
 	}
@@ -146,21 +131,21 @@ func (s *metricsServer) collect(ctx context.Context) {
 	}
 
 	for {
+		resp, err := stream.Recv()
+		if err != nil {
+			logrus.Errorf("MetricsCollector: stream.Recv() err: %v", err)
+		} else {
+			vppStats := resp.GetStats().GetVppStats()
+			if vppStats.Interface != nil {
+				s.updateStatistics(vppStats.Interface)
+			}
+			logrus.Infof("MetricsCollector: GetStats(): %v", vppStats)
+		}
 		select {
 		case <-ctx.Done():
+			logrus.Errorf("MetricsCollector: Monitor poll canceled")
 			return
 		case <-time.After(s.interval):
-		default:
-			resp, err := stream.Recv()
-			if err != nil {
-				logrus.Errorf("MetricsCollector: stream.Recv() err: %v", err)
-			} else {
-				vppStats := resp.GetStats().GetVppStats()
-				if vppStats.Interface != nil {
-					s.updateStatistics(vppStats.Interface)
-				}
-				logrus.Infof("MetricsCollector: GetStats(): %v", vppStats)
-			}
 		}
 	}
 }
@@ -176,7 +161,6 @@ func (s *metricsServer) updateStatistics(stats *vpp_interfaces.InterfaceStats) {
 		if connID, ok := s.vppConnections[stats.Name]; ok {
 			info := s.connections[connID]
 			info.metrics = metrics
-			s.metricsRecieved++
 		}
 	})
 }

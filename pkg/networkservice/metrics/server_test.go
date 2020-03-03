@@ -63,9 +63,7 @@ func TestMonitorVppEvents(t *testing.T) {
 	client := &testClient{
 		notifications: make(chan *configurator.PollStatsResponse, 10),
 	}
-	server := metrics.NewServer(5*time.Second, client)
-
-	monServer := server.(metrics.Server)
+	server := metrics.NewServer(1*time.Second, client)
 	require.NotNil(t, server)
 
 	ctx := vppagent.WithConfig(context.Background())
@@ -75,31 +73,30 @@ func TestMonitorVppEvents(t *testing.T) {
 		Name: "client-id0",
 	})
 
-	response, err := server.Request(ctx, &networkservice.NetworkServiceRequest{
-		Connection: &networkservice.Connection{
-			Id: "id0",
-		},
-	})
+	req := newRequest()
+	response, err := server.Request(ctx, req)
 	require.NotNil(t, response)
 	require.Nil(t, err)
 
 	client.notifications <- createDummyNotification()
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	client.notifications <- createDummyNotification()
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	for {
 		select {
 		case <-timeoutCtx.Done():
+			require.Fail(t, "Timeout waiting for metrics")
 		case <-time.After(10 * time.Millisecond):
 		}
-		if monServer.GetMetricsReceived() == 1 {
+		response, err = server.Request(ctx, req)
+		require.NotNil(t, response)
+		require.Nil(t, err)
+		if len(response.GetPath().GetPathSegments()[0].GetMetrics()) > 0 {
 			break
 		}
 	}
-
-	c := newRequest()
-	response, err = server.Request(ctx, c)
-	require.NotNil(t, response)
-	require.Nil(t, err)
+	// Check metrics returned.
 	require.Equal(t, "11", response.GetPath().GetPathSegments()[0].GetMetrics()["rx_bytes"])
 	require.Equal(t, 6, len(response.GetPath().GetPathSegments()[0].GetMetrics()))
 
@@ -141,7 +138,7 @@ func createDummyNotification() *configurator.PollStatsResponse {
 				Name:    "client-id0",
 				Rx:      &vppInt.InterfaceStats_CombinedCounter{Bytes: 11, Packets: 11},
 				Tx:      &vppInt.InterfaceStats_CombinedCounter{Bytes: 12, Packets: 12},
-				RxError: 0,
+				RxError: uint64(time.Now().Second()),
 				TxError: 0,
 				RxNoBuf: 0,
 				RxMiss:  0,
