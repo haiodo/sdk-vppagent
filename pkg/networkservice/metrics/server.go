@@ -120,7 +120,7 @@ func NewServer(interval time.Duration, vppClient configurator.StatsPollerService
 }
 
 func (s *metricsServer) collect(ctx context.Context) {
-	logrus.Errorf("MetricsCollector: Start collector")
+	logrus.Infof("MetricsCollector: Start collector")
 	req := &configurator.PollStatsRequest{
 		PeriodSec: uint32(s.interval.Seconds()),
 	}
