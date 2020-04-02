@@ -28,7 +28,6 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
-	"testing"
 	"time"
 
 	linux_namespace "go.ligato.io/vpp-agent/v3/proto/ligato/linux/namespace"
@@ -56,8 +55,8 @@ import (
 )
 
 const (
-	dockerTimeout  = 60 * time.Second
-	ligatoVppAgent = "ligato/vpp-agent:v3.0.1"
+	dockerTimeout  = 120 * time.Second
+	ligatoVppAgent = "ligato/vpp-agent:v3.1.0"
 )
 
 // DockerTest - a base interface for docker setup of vpp agent configuration
@@ -101,7 +100,7 @@ type DockerContainer interface {
 
 type dockerTest struct {
 	connection *client.Client
-	t          *testing.T
+	t          require.TestingT
 	containers []DockerContainer
 	vppConn    *grpc.ClientConn
 	client     configurator.ConfiguratorServiceClient
@@ -774,7 +773,7 @@ func (d *dockerTest) CreateContainer(name, containerImage string, cmdLine []stri
 }
 
 // NewDockerTest - creates a docker testing helper infrastructure
-func NewDockerTest(t *testing.T) DockerTest {
+func NewDockerTest(t require.TestingT) DockerTest {
 	cli, err := client.NewEnvClient()
 	require.Nil(t, err)
 

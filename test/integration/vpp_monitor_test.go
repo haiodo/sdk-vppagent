@@ -44,7 +44,7 @@ func TestMonitorChain(t *testing.T) {
 
 	// Prepare kernel connection between alpine1 to alpine2
 
-	metricServer := metrics.NewServer(1*time.Second, configurator.NewStatsPollerServiceClient(client))
+	metricServer := metrics.NewServer(configurator.NewStatsPollerServiceClient(client))
 
 	conn := newConnection()
 

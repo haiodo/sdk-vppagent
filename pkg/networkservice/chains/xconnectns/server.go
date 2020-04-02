@@ -18,7 +18,6 @@
 package xconnectns
 
 import (
-	"github.com/networkservicemesh/sdk-vppagent/pkg/networkservice/metrics"
 	"net"
 	"net/url"
 
