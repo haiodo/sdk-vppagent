@@ -33,12 +33,12 @@ import (
 	"github.com/networkservicemesh/sdk-vppagent/test/dockertest"
 )
 
-func TestMonitorChain(t *testing.T) {
+func TestMetricsServerRequestMetrics(t *testing.T) {
 	dt := dockertest.NewDockerTest(t)
 	defer dt.Stop()
 	dt.Setup()
 
-	client := dt.GetGRPCClientConn()
+	client := dt.ConfigurationClientConn()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 

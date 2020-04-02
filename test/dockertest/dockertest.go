@@ -69,7 +69,7 @@ type DockerTest interface {
 	GetContainers() []DockerContainer
 	GetClients() []DockerContainer
 	GetClient() configurator.ConfiguratorServiceClient
-	GetGRPCClientConn() grpc.ClientConnInterface
+	ConfigurationClientConn() grpc.ClientConnInterface
 
 	ApplyKernelConnection(client1, client2 DockerContainer)
 }
@@ -125,11 +125,10 @@ func (d *dockerTest) ApplyKernelConnection(client1, client2 DockerContainer) {
 	logrus.Infof("Agent1 netNS: %v", ns1)
 	ns2 := client2.GetNetNS()
 	logrus.Infof("Agent2 netNS: %v", ns2)
-	//
+
 	s1 := client1.GetStatus()
 	s2 := client2.GetStatus()
 
-	//
 	ip1 := "10.30.1.1/30"
 	ip2 := "10.30.1.2/30"
 
@@ -143,7 +142,7 @@ func (d *dockerTest) ApplyKernelConnection(client1, client2 DockerContainer) {
 
 	logrus.Infof("Agent1 ip %v net %v", ip1, net1File)
 	logrus.Infof("Agent2 ip %v net %v", ip2, net2File)
-	//
+
 	rv := &configurator.Config{
 		LinuxConfig: &linux.ConfigData{},
 		VppConfig:   &vpp.ConfigData{},
@@ -234,7 +233,7 @@ func (d *dockerTest) GetClients() []DockerContainer {
 	}
 	return result
 }
-func (d *dockerTest) GetGRPCClientConn() grpc.ClientConnInterface {
+func (d *dockerTest) ConfigurationClientConn() grpc.ClientConnInterface {
 	return d.vppConn
 }
 
