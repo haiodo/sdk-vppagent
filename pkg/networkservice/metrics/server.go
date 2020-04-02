@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"go.ligato.io/vpp-agent/v3/proto/ligato/configurator"
 	vpp_interfaces "go.ligato.io/vpp-agent/v3/proto/ligato/vpp/interfaces"
@@ -36,19 +35,8 @@ import (
 )
 
 type metricsServer struct {
-	interval        time.Duration
-	connections     map[string]*connectionInfo
-	vppConnections  map[string]string
-	executor        serialize.Executor
-	vppClient       configurator.StatsPollerServiceClient
-	collectorCancel context.CancelFunc
-}
-
-type connectionInfo struct {
-	connectionID string
-	index        uint32
-	metrics      map[string]string
-	ifName       string
+	executor  serialize.Executor
+	vppClient configurator.StatsPollerServiceClient
 }
 
 func (s *metricsServer) Request(ctx context.Context, request *networkservice.NetworkServiceRequest) (*networkservice.Connection, error) {
@@ -60,96 +48,58 @@ func (s *metricsServer) Request(ctx context.Context, request *networkservice.Net
 	if len(ifaces) == 0 {
 		return nil, errors.New("VPPAgent config should contain at least one interface")
 	}
-
 	index := request.GetConnection().GetPath().GetIndex()
-
 	conn, err := next.Server(ctx).Request(ctx, request)
 	if err == nil {
 		<-s.executor.AsyncExec(func() {
-			if len(s.connections) == 0 {
-				// Start collector go routine.
-				ctx, cancel := context.WithCancel(context.Background())
-				s.collectorCancel = cancel
-				go s.collect(ctx)
-			}
-			info := s.connections[conn.GetId()]
-			if info == nil {
-				info = &connectionInfo{
-					connectionID: conn.GetId(),
-					index:        conn.GetPath().GetIndex(),
-					metrics:      map[string]string{},
-					ifName:       ifaces[0].Name,
-				}
-				s.connections[conn.GetId()] = info
-				// Store interface name to store values into
-				s.vppConnections[info.ifName] = info.connectionID
-			}
-			// Update connection with metrics
-			if len(info.metrics) > 0 && len(conn.GetPath().GetPathSegments()) > int(index) {
-				conn.GetPath().GetPathSegments()[index].Metrics = info.metrics
-			}
+			s.retieveVppStats(ctx, conn, index, ifaces)
 		})
 	}
 	return conn, err
 }
 
-func (s *metricsServer) Close(ctx context.Context, conn *networkservice.Connection) (*empty.Empty, error) {
-	s.executor.AsyncExec(func() {
-		info := s.connections[conn.GetId()]
-		if info != nil {
-			delete(s.connections, info.connectionID)
-			delete(s.vppConnections, info.ifName)
-		}
-		if len(s.connections) == 0 && s.collectorCancel != nil {
-			s.collectorCancel()
-			s.collectorCancel = nil
-		}
-	})
-	return next.Server(ctx).Close(ctx, conn)
-}
-
-// NewServer creates a new metrics collector instance
-func NewServer(interval time.Duration, vppClient configurator.StatsPollerServiceClient) networkservice.NetworkServiceServer {
-	rv := &metricsServer{
-		connections:    map[string]*connectionInfo{},
-		vppConnections: map[string]string{},
-		interval:       interval,
-		vppClient:      vppClient,
-	}
-	return rv
-}
-
-func (s *metricsServer) collect(ctx context.Context) {
-	logrus.Infof("MetricsCollector: Start collector")
+func (s *metricsServer) retieveVppStats(ctx context.Context, conn *networkservice.Connection, index uint32, ifaces []*vpp_interfaces.Interface) {
+	logrus.Debugf("MetricsServer: Request Metrics")
 	req := &configurator.PollStatsRequest{
-		PeriodSec: uint32(s.interval.Seconds()),
+		PeriodSec: 0,
+		NumPolls:  0,
 	}
-	stream, err := s.vppClient.PollStats(ctx, req)
+	streamCtx, cancelOp := context.WithCancel(ctx)
+	defer cancelOp()
+	stream, err := s.vppClient.PollStats(streamCtx, req)
 	if err != nil {
-		logrus.Errorf("MetricsCollector: PollStats err: %v", err)
+		logrus.Errorf("MetricsServer: Request Metrics: PollStats err: %v", err)
 		return
 	}
 
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
-			logrus.Errorf("MetricsCollector: stream.Recv() err: %v", err)
+			logrus.Errorf("MetricsServer: stream.Recv() err: %v", err)
 		} else {
 			vppStats := resp.GetStats().GetVppStats()
-			if vppStats.Interface != nil {
-				s.updateStatistics(vppStats.Interface)
+			if vppStats.Interface != nil && vppStats.Interface.Name == ifaces[0].Name {
+				conn.GetPath().GetPathSegments()[index].Metrics = s.newStatistics(vppStats.Interface)
+				return
 			}
-			logrus.Infof("MetricsCollector: GetStats(): %v", vppStats)
-		}
-		select {
-		case <-ctx.Done():
-			logrus.Errorf("MetricsCollector: Monitor poll canceled")
-			return
-		case <-time.After(s.interval):
+			logrus.Debugf("MetricsServer: GetStats(): %v", vppStats)
 		}
 	}
 }
-func (s *metricsServer) updateStatistics(stats *vpp_interfaces.InterfaceStats) {
+
+func (s *metricsServer) Close(ctx context.Context, conn *networkservice.Connection) (*empty.Empty, error) {
+	return next.Server(ctx).Close(ctx, conn)
+}
+
+// NewServer creates a new metrics collector instance
+func NewServer(vppClient configurator.StatsPollerServiceClient) networkservice.NetworkServiceServer {
+	rv := &metricsServer{
+		vppClient: vppClient,
+	}
+	return rv
+}
+
+func (s *metricsServer) newStatistics(stats *vpp_interfaces.InterfaceStats) map[string]string {
 	metrics := make(map[string]string)
 	metrics["rx_bytes"] = fmt.Sprint(stats.Rx.Bytes)
 	metrics["tx_bytes"] = fmt.Sprint(stats.Tx.Bytes)
@@ -157,10 +107,5 @@ func (s *metricsServer) updateStatistics(stats *vpp_interfaces.InterfaceStats) {
 	metrics["tx_packets"] = fmt.Sprint(stats.Tx.Packets)
 	metrics["rx_error_packets"] = fmt.Sprint(stats.RxError)
 	metrics["tx_error_packets"] = fmt.Sprint(stats.TxError)
-	s.executor.AsyncExec(func() {
-		if connID, ok := s.vppConnections[stats.Name]; ok {
-			info := s.connections[connID]
-			info.metrics = metrics
-		}
-	})
+	return metrics
 }

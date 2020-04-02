@@ -63,7 +63,7 @@ func TestMonitorVppEvents(t *testing.T) {
 	client := &testClient{
 		notifications: make(chan *configurator.PollStatsResponse, 10),
 	}
-	server := metrics.NewServer(1*time.Second, client)
+	server := metrics.NewServer(client)
 	require.NotNil(t, server)
 
 	ctx := vppagent.WithConfig(context.Background())
@@ -73,29 +73,12 @@ func TestMonitorVppEvents(t *testing.T) {
 		Name: "client-id0",
 	})
 
+	client.notifications <- createDummyNotification()
 	req := newRequest()
 	response, err := server.Request(ctx, req)
 	require.NotNil(t, response)
 	require.Nil(t, err)
 
-	client.notifications <- createDummyNotification()
-	client.notifications <- createDummyNotification()
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	for {
-		select {
-		case <-timeoutCtx.Done():
-			require.Fail(t, "Timeout waiting for metrics")
-		case <-time.After(10 * time.Millisecond):
-		}
-		response, err = server.Request(ctx, req)
-		require.NotNil(t, response)
-		require.Nil(t, err)
-		if len(response.GetPath().GetPathSegments()[0].GetMetrics()) > 0 {
-			break
-		}
-	}
 	// Check metrics returned.
 	require.Equal(t, "11", response.GetPath().GetPathSegments()[0].GetMetrics()["rx_bytes"])
 	require.Equal(t, 6, len(response.GetPath().GetPathSegments()[0].GetMetrics()))

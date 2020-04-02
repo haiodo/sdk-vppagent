@@ -20,7 +20,6 @@ package xconnectns
 import (
 	"net"
 	"net/url"
-	"time"
 
 	"github.com/networkservicemesh/sdk-vppagent/pkg/networkservice/metrics"
 
@@ -89,7 +88,7 @@ func NewServer(name string, authzPolicy *rego.PreparedEvalQuery, vppagentCC grpc
 		),
 		ipaddress.NewServer(),
 		routes.NewServer(),
-		metrics.NewServer(5*time.Second, configurator.NewStatsPollerServiceClient(vppagentCC)),
+		metrics.NewServer(configurator.NewStatsPollerServiceClient(vppagentCC)),
 		commit.NewServer(vppagentCC),
 	)
 	return rv
